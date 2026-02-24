@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Polymarket Board</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0d0d;
+      --bg2:       #141414;
+      --fg:        #e0e0e0;
+      --dim:       #666;
+      --accent:    #00e5ff;
+      --green:     #00c853;
+      --red:       #ff1744;
+      --border:    #2a2a2a;
+      --font:      'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.4;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg2);
+    }
+
+    .logo {
+      font-size: 15px;
+      font-weight: bold;
+      color: var(--bg);
+      background: var(--accent);
+      padding: 2px 8px;
+      letter-spacing: 1px;
+    }
+
+    .header-title {
+      color: var(--fg);
+      font-weight: bold;
+    }
+
+    .header-ts {
+      color: var(--dim);
+      font-size: 12px;
+      margin-left: auto;
+    }
+
+    .nav-btn {
+      font-size: 11px;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 2px 8px;
+      text-decoration: none;
+      letter-spacing: 0.5px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-btn:hover { background: var(--accent); color: var(--bg); }
+
+    /* live indicator */
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--dim);
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .live-dot.connected {
+      background: var(--green);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ── Table wrapper ──────────────────────────────────────────── */
+    .table-wrap {
+      overflow-x: auto;
+      padding: 16px 18px;
+    }
+
+    table {
+      border-collapse: collapse;
+      white-space: nowrap;
+      min-width: 700px;
+    }
+
+    thead th {
+      color: var(--accent);
+      font-weight: bold;
+      text-align: right;
+      padding: 4px 8px;
+      border-bottom: 2px solid var(--accent);
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    thead th.left { text-align: left; }
+
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    tbody tr:hover { background: var(--bg2); }
+
+    tbody td {
+      padding: 5px 8px;
+      text-align: right;
+      color: var(--fg);
+      vertical-align: middle;
+    }
+    tbody td.left  { text-align: left; }
+    tbody td.dim   { color: var(--dim); }
+    tbody td.rank  { color: var(--dim); width: 28px; }
+    tbody td.event-title {
+      text-align: left;
+      font-weight: bold;
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    tbody td.vol    { color: var(--fg); }
+    tbody td.vol24h { color: var(--dim); }
+
+    /* contender group visual separator */
+    td.cont-name {
+      text-align: left;
+      font-style: italic;
+      color: #aaa;
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-left: 1px solid #222;
+      padding-left: 10px;
+    }
+    td.cont-price { font-weight: bold; }
+    td.cont-delta { font-size: 12px; }
+
+    td.up    { color: var(--green); }
+    td.down  { color: var(--red); }
+    td.flat  { color: var(--dim); }
+
+    /* empty state */
+    .empty {
+      padding: 40px 18px;
+      color: var(--dim);
+      text-align: center;
+    }
+
+    /* footer */
+    footer {
+      padding: 8px 18px;
+      color: var(--dim);
+      font-size: 11px;
+      border-top: 1px solid var(--border);
+    }
+    footer span { margin-right: 16px; }
+    footer .up   { color: var(--green); }
+    footer .down { color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">POLYMARKET</span>
+  <span class="header-title">Top Events by Volume</span>
+  <span class="live-dot" id="liveDot"></span>
+  <span id="liveLabel" style="color:var(--dim);font-size:11px;">connecting…</span>
+  <span class="header-ts" id="headerTs">—</span>
+  <a class="nav-btn" href="/new">enhanced →</a>
+</header>
+
+<div class="table-wrap" id="tableWrap">
+  <div class="empty" id="emptyMsg">Loading data…</div>
+</div>
+
+<footer>
+  <span>Deltas:</span>
+  <span class="up">▲ up</span>
+  <span class="down">▼ down</span>
+  <span style="margin-left:8px">Prices = probability in cents</span>
+</footer>
+
+<script>
+  const N_CONT = 5;
+
+  // ── HTML escape ────────────────────────────────────────────────
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── DOM refs ───────────────────────────────────────────────────
+  const dot       = document.getElementById('liveDot');
+  const liveLabel = document.getElementById('liveLabel');
+  const headerTs  = document.getElementById('headerTs');
+  const tableWrap = document.getElementById('tableWrap');
+
+  function setLive(connected) {
+    dot.className = 'live-dot' + (connected ? ' connected' : '');
+    liveLabel.textContent = connected ? 'live' : 'polling';
+  }
+
+  // ── Render ─────────────────────────────────────────────────────
+  function renderBoard(data) {
+    headerTs.textContent = data.ts ? data.ts.replace('T', '  ').replace('Z', ' UTC') : '—';
+
+    if (!data.events || data.events.length === 0) {
+      tableWrap.innerHTML = '<div class="empty">No data available.</div>';
+      return;
+    }
+
+    // Build header
+    let contHeaders = '';
+    for (let i = 1; i <= N_CONT; i++) {
+      contHeaders += `<th class="left" style="border-left:1px solid #222;padding-left:10px">#${i}</th>
+                      <th>Prc¢</th>
+                      <th>Δ24h</th>`;
+    }
+
+    let thead = `<thead><tr>
+      <th class="left">#</th>
+      <th class="left">Event</th>
+      <th>Total</th>
+      <th>24h</th>
+      ${contHeaders}
+    </tr></thead>`;
+
+    // Build rows
+    let rows = '';
+    for (const ev of data.events) {
+      const conts = (ev.contenders || []).slice(0, N_CONT);
+      // Pad to N_CONT
+      while (conts.length < N_CONT) conts.push({ name: '', price: '', delta: { text: '', direction: 'flat' } });
+
+      let contCells = '';
+      for (const c of conts) {
+        const dir = c.delta ? c.delta.direction : 'flat';
+        const dtxt = c.delta ? escHtml(c.delta.text) : '';
+        contCells += `<td class="cont-name">${escHtml(c.name)}</td>
+                      <td class="cont-price">${escHtml(c.price)}</td>
+                      <td class="cont-delta ${escHtml(dir)}">${dtxt}</td>`;
+      }
+
+      rows += `<tr>
+        <td class="rank">${ev.rank}</td>
+        <td class="event-title" title="${escHtml(ev.title)}">${escHtml(ev.title)}</td>
+        <td class="vol">${escHtml(ev.volume)}</td>
+        <td class="vol24h">${escHtml(ev.volume24h)}</td>
+        ${contCells}
+      </tr>`;
+    }
+
+    tableWrap.innerHTML = `<table>${thead}<tbody>${rows}</tbody></table>`;
+  }
+
+  // ── Limit from URL param (default 10) ─────────────────────────
+  const params = new URLSearchParams(location.search);
+  const limit  = Math.min(100, Math.max(1, parseInt(params.get('limit') || '10', 10)));
+
+  // ── Polling fallback ───────────────────────────────────────────
+  let pollTimer = null;
+
+  async function poll() {
+    try {
+      const res = await fetch(`/api/events?limit=${limit}`);
+      if (res.ok) renderBoard(await res.json());
+    } catch (_) { /* ignore */ }
+    pollTimer = setTimeout(poll, 30_000);
+  }
+
+  function startPolling() {
+    setLive(false);
+    if (pollTimer) clearTimeout(pollTimer);
+    poll();
+  }
+
+  // ── SSE ────────────────────────────────────────────────────────
+  function connectSSE() {
+    const es = new EventSource(`/api/events/stream?limit=${limit}`);
+
+    es.onopen = () => {
+      setLive(true);
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    };
+
+    es.onmessage = (e) => {
+      try {
+        renderBoard(JSON.parse(e.data));
+      } catch (_) { /* ignore malformed */ }
+    };
+
+    es.onerror = () => {
+      es.close();
+      startPolling();
+      // Retry SSE after 15s
+      setTimeout(connectSSE, 15_000);
+    };
+  }
+
+  // ── Boot ───────────────────────────────────────────────────────
+  connectSSE();
+</script>
+</body>
+</html>

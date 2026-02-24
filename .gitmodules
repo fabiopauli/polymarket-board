@@ -1,0 +1,3 @@
+[submodule "polymarket-cli"]
+	path = polymarket-cli
+	url = https://github.com/Polymarket/polymarket-cli

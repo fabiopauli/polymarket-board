@@ -1,0 +1,5 @@
+[deploy]
+healthcheckPath    = "/api/events"
+healthcheckTimeout = 60
+restartPolicyType  = "on-failure"
+restartPolicyMaxRetries = 3
