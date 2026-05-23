@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import argparse
+from urllib.parse import urlencode
 from datetime import datetime, timezone
 
 from rich.console import Console
@@ -23,6 +24,8 @@ PM_BIN = "/home/fipauli/polymarket/polymarket-cli/target/release/polymarket"
 console = Console()
 
 TOP_N_CONTENDERS = 5
+GAMMA_API_HOST = "gamma-api.polymarket.com"
+GAMMA_API_RESOLVE_IPS = ("104.18.34.205", "172.64.153.51")
 
 
 # ─── Data fetching ────────────────────────────────────────────────────────────
@@ -37,7 +40,7 @@ def fetch_events(limit: int = 10) -> list[dict]:
     )
     if result.returncode != 0:
         console.print(f"[red]Error:[/] {result.stderr.strip()}")
-        return []
+        return fetch_events_via_gamma(fetch_count, limit)
     try:
         data = json.loads(result.stdout)
         data.sort(key=lambda e: float(e.get("volume") or 0), reverse=True)
@@ -45,6 +48,39 @@ def fetch_events(limit: int = 10) -> list[dict]:
     except json.JSONDecodeError as exc:
         console.print(f"[red]JSON error:[/] {exc}")
         return []
+
+
+def fetch_events_via_gamma(fetch_count: int, limit: int) -> list[dict]:
+    """Fetch directly from Gamma when local DNS prevents the CLI from resolving."""
+    query = urlencode({"active": "true", "closed": "false", "limit": fetch_count})
+    url = f"https://{GAMMA_API_HOST}/events?{query}"
+
+    for ip in GAMMA_API_RESOLVE_IPS:
+        result = subprocess.run(
+            [
+                "curl",
+                "-fsS",
+                "--max-time",
+                "20",
+                "--resolve",
+                f"{GAMMA_API_HOST}:443:{ip}",
+                url,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            continue
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            console.print(f"[red]Fallback JSON error:[/] {exc}")
+            return []
+        data.sort(key=lambda e: float(e.get("volume") or 0), reverse=True)
+        return data[:limit]
+
+    console.print("[red]Fallback error:[/] could not fetch Gamma API via resolved IPs")
+    return []
 
 
 def top_contenders(event: dict) -> list[dict]:

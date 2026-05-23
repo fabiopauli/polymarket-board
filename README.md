@@ -189,6 +189,15 @@ PM_BIN=/usr/local/bin/polymarket PM_CACHE_TTL=60 \
   uv run uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
+### Network fallback
+
+`dashboard.py` normally fetches events through the bundled Polymarket CLI. If the
+CLI cannot resolve `gamma-api.polymarket.com` (a common WSL DNS failure), the
+dashboard automatically falls back to a direct Gamma API request using `curl
+--resolve` and current Cloudflare IPs for the Gamma host. This keeps the terminal
+dashboard, `/api/events`, `/`, and `/new` working without requiring a manual
+`/etc/hosts` edit.
+
 ---
 
 ## Web UI
@@ -229,11 +238,17 @@ Browser  ──SSE──►  FastAPI (server.py)
                        ▼
               dashboard.py (fetch_events, _all_contenders, fmt_*)
                        │
-                       ▼
+                       ├── primary
           polymarket-cli/target/release/polymarket  (subprocess)
                        │
                        ▼
               Polymarket public API (CLOB / events)
+
+                       └── fallback, when CLI DNS fails
+              curl --resolve gamma-api.polymarket.com:443:<ip>
+                       │
+                       ▼
+              Polymarket Gamma API (/events)
 ```
 
 - `dashboard.py` is **imported** by `server.py` — no code duplication.
@@ -242,6 +257,8 @@ Browser  ──SSE──►  FastAPI (server.py)
 - A single `asyncio.Lock` prevents cache stampede when multiple tabs connect.
 - `server.py` calls `_all_contenders()` (all markets, not capped at 5) so the
   browser can display any N contenders without a second fetch.
+- If local DNS cannot resolve the Gamma host, `dashboard.py` falls back to a
+  direct HTTPS request with `curl --resolve`.
 
 ---
 
@@ -258,6 +275,21 @@ source ~/.cargo/env
 # or permanently:
 echo 'source ~/.cargo/env' >> ~/.bashrc
 ```
+
+### `gamma-api.polymarket.com` does not resolve
+
+Some WSL setups generate a resolver that cannot resolve Polymarket's Gamma API
+host. The app now handles this automatically with the fallback described in
+**Configuration → Network fallback**.
+
+If you want to fix the host system instead, verify the failure with:
+
+```bash
+curl -I 'https://gamma-api.polymarket.com/events?limit=1&closed=false'
+```
+
+Then refresh WSL networking or add a host override for
+`gamma-api.polymarket.com` using the current DNS answers from a public resolver.
 
 ### Port 8000 already in use
 
